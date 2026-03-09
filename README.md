@@ -14,6 +14,7 @@ A Slack-native workflow engine that accelerates organizational decision-making b
 - [Airtable Schema](#airtable-schema)
 - [SLA Rules](#sla-rules)
 - [Setup & Installation](#setup--installation)
+- [Running with Intuit Cloud Workspaces](#running-with-intuit-cloud-workspaces)
 - [Running Locally](#running-locally)
 - [Slack App Configuration](#slack-app-configuration)
 - [Environment Variables](#environment-variables)
@@ -156,6 +157,11 @@ ics-decision-engine/
 ├── requirements.txt        # Pinned Python dependencies
 ├── .env.example            # Template for required environment variables
 │
+├── .devcontainer/          # Intuit Cloud Workspaces configuration
+│   ├── devcontainer.json   # Container config — exposes port 8000 publicly
+│   ├── init.sh             # Runs once on container creation (installs deps)
+│   └── start.sh            # Runs on every container start (launches uvicorn)
+│
 ├── handlers/               # Business logic — one file per concern
 │   ├── commands.py         # /decision slash command handler
 │   ├── modals.py           # Intake + Resolution modal submission handlers
@@ -280,7 +286,7 @@ When `escalated` fires, the Airtable record status is also set to `ESCALATED`.
 - A [Slack App](https://api.slack.com/apps) with a bot token
 - An [Anthropic API key](https://console.anthropic.com)
 - An [Airtable base](https://airtable.com) with the schema above
-- [ngrok](https://ngrok.com) (for local development)
+- Access to [Intuit Cloud Workspaces](https://devportal.intuit.com) (for exposing the service to Slack)
 
 ### Install
 
@@ -306,20 +312,72 @@ Open `.env` and fill in all required values (see [Environment Variables](#enviro
 
 ---
 
+## Running with Intuit Cloud Workspaces
+
+Intuit Cloud Workspaces (CWS) is the approved internal tunnel solution — no ngrok or external tools needed. The `.devcontainer` configuration is already included in this repo.
+
+### Step 1 — Provision your Workspace
+
+1. Go to **[DevPortal → Cloud Workspaces → Manage](https://devportal.intuit.com)**
+2. Click **"Create Workspace"** and paste the repo URL:
+   ```
+   https://github.com/kamalanandharumugam-intuit/ics-decision-engine
+   ```
+3. Wait for the status to change from **`Pending`** → **`Running`**
+
+### Step 2 — Add your credentials
+
+The `.env` file is gitignored (secrets are never committed). Add it manually via the IDE terminal once connected:
+
+```bash
+cp .env.example .env
+nano .env    # fill in all required values
+```
+
+### Step 3 — Find your public tunnel URL
+
+1. From the CWS dashboard, click **"Open in Visual Studio Code Online"**
+2. Your browser URL will look like:
+   ```
+   https://vscode--ics-decision-engine-XXXXXXXX.cws.cwsppdusw2.iks2.a.intuit.com
+   ```
+3. Replace the `vscode` prefix with `8000` to get your tunnel URL:
+   ```
+   https://8000--ics-decision-engine-XXXXXXXX.cws.cwsppdusw2.iks2.a.intuit.com
+   ```
+
+This is your `<your-cws-url>` — use it everywhere Slack needs a public HTTPS endpoint.
+
+### Step 4 — Start the server
+
+The `start.sh` script auto-runs on workspace startup. If you need to restart it manually:
+
+```bash
+cd /workspace/ics-decision-engine
+uvicorn app:api --host 0.0.0.0 --port 8000 --reload
+```
+
+> **Note:** If you encounter request timeouts from external services, contact `@cloud-workspaces-oncall` in `#cmty-cloud-workspaces` to allowlist your cluster IPs.
+
+---
+
 ## Running Locally
+
+For development outside of CWS, you can run the server locally:
 
 ```bash
 # Start the server
 uvicorn app:api --reload --port 8000
 ```
 
-In a second terminal, expose it to Slack:
+To expose it to Slack from your local machine, use Cloudflare Tunnel (no account needed):
 
 ```bash
-ngrok http 8000
+brew install cloudflare/cloudflare/cloudflared
+cloudflared tunnel --url http://localhost:8000
 ```
 
-Copy the `https://xxxx.ngrok.io` URL — you'll need it for Slack app configuration.
+Copy the `https://random-name.trycloudflare.com` URL — use it for Slack app configuration.
 
 ---
 
@@ -341,17 +399,20 @@ Add these **Bot Token Scopes**:
 ### 2. Slash Commands
 Create a new command:
 - **Command:** `/decision`
-- **Request URL:** `https://<your-ngrok-url>/slack/commands`
+- **Request URL:** `https://<your-cws-url>/slack/commands`
 - **Short Description:** `Submit a new decision request`
 - **Usage Hint:** `new`
 
 ### 3. Interactivity & Shortcuts
 - **Enable Interactivity:** On
-- **Request URL:** `https://<your-ngrok-url>/slack/interactivity`
+- **Request URL:** `https://<your-cws-url>/slack/interactivity`
 
 ### 4. Event Subscriptions
 - **Enable Events:** On
-- **Request URL:** `https://<your-ngrok-url>/slack/events`
+- **Request URL:** `https://<your-cws-url>/slack/events`
+
+> Replace `<your-cws-url>` with your Intuit Cloud Workspace tunnel URL, e.g.
+> `https://8000--ics-decision-engine-XXXXXXXX.cws.cwsppdusw2.iks2.a.intuit.com`
 
 ### 5. Install the App
 Go to **Install App** → **Install to Workspace** → copy the `Bot User OAuth Token` into your `.env`.
